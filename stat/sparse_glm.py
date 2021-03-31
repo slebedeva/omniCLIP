@@ -26,10 +26,10 @@
 from scipy.sparse import csc_matrix, linalg as sla
 from statsmodels.genmod import families
 from statsmodels.genmod.generalized_linear_model import *
-from statsmodels.tools.decorators import cache_readonly, resettable_cache
 from statsmodels.tools.sm_exceptions import PerfectSeparationError
-import cPickle
+import pickle
 import numpy as np
+import os
 import pdb
 import scipy
 import statsmodels
@@ -43,12 +43,13 @@ import time
 __all__ = ['GLM']
 
 
+#@profile 
 def _check_convergence(criterion, iteration, tol):
     return not (np.fabs(criterion[iteration] - criterion[iteration-1]) > tol)
 
 
 class sparse_glm(statsmodels.genmod.generalized_linear_model.GLM):
-    def __init__(self, endog, exog, family=None, offset=None, exposure=None, missing='none', data_weights = None, **kwargs):
+    def __init__(self, endog, exog, family=None, offset=None, exposure=None, missing='none', data_weights = None, tmp_dir='./', **kwargs):
 
         if hasattr(family, 'safe_links'):
             if (family is not None) and not isinstance(family.link, tuple(family.safe_links)):
@@ -59,6 +60,7 @@ class sparse_glm(statsmodels.genmod.generalized_linear_model.GLM):
         self.exog = exog
         self.offset = offset
         self.exposure = exposure
+        self.tmp_dir=tmp_dir
         if data_weights is not None:
         	self.data_weights = data_weights
         if exposure is not None:
@@ -114,7 +116,7 @@ class sparse_glm(statsmodels.genmod.generalized_linear_model.GLM):
             See LikelihoodModelResults notes section for more information.
             Not used if methhod is IRLS.
         disp : bool, optional
-            Set to True to print convergence messages.  Not used if method is
+            Set to True to print  convergence messages.  Not used if method is
             IRLS.
         max_start_irls : int
             The number of IRLS iterations used to obtain starting
@@ -195,6 +197,8 @@ class sparse_glm(statsmodels.genmod.generalized_linear_model.GLM):
             mu = self.family.fitted(lin_pred)
 
         dev = self.family.deviance(self.endog[self.endog[:,0]>0,:], mu[self.endog[:,0]>0,:])
+
+        
         if np.isnan(dev):
             if not (start_params is None):
                 #This is a hack for a faster warm start
@@ -206,14 +210,17 @@ class sparse_glm(statsmodels.genmod.generalized_linear_model.GLM):
                 dev = self.family.deviance(self.endog, mu)
 
                 if np.isnan(dev):
-                    cPickle.dump([lin_pred, mu, endog, exog, start_params], open('/home/pdrewe/tmp/tmpdump.' + time.asctime().replace(' ', '_') + '.dat', 'w'))
+                    dump_path = os.path.join(self.tmp_dir, 'tmpdump.' + time.asctime().replace(' ', '_') + '.dat')
+
+                    pickle.dump([lin_pred, mu, endog, exog, start_params], open(dump_path, 'w'))
                     raise ValueError("The first guess on the deviance function "
                                  "returned a nan.  This could be a boundary "
-                                 " problem and should be reported.")
+                                 " problem and should be reported. Please try to restart omniCLIP."
+                                 "Parameter dump at: " + dump_path)
             else:
                 raise ValueError("The first guess on the deviance function "
                              "returned a nan.  This could be a boundary "
-                             " problem and should be reported.")
+                             " problem and should be reported. Please try to restart omniCLIP.")
 
         # first guess on the deviance is assumed to be scaled by 1.
         # params are none to start, so they line up with the deviance
@@ -233,7 +240,7 @@ class sparse_glm(statsmodels.genmod.generalized_linear_model.GLM):
 
             #Compute x for current interation
             temp_mat = wlsexog.transpose().dot(W)
-            lu = sla.splu(temp_mat.dot(wlsexog))
+            lu = sla.splu(csc_matrix(temp_mat.dot(wlsexog)))
             wls_results = lu.solve(temp_mat.dot(wlsendog))
             wls_results[wls_results > 1e2] = 1e2
             wls_results[wls_results < -1e2] = -1e2
@@ -242,6 +249,8 @@ class sparse_glm(statsmodels.genmod.generalized_linear_model.GLM):
             mu = self.family.fitted(lin_pred)
             history['mu'] = mu
             history['params'].append(wls_results)
+            temp_endog = self.endog[:]
+            temp_endog[temp_endog < 0] = 0
             history['deviance'].append(self.family.deviance(self.endog, mu))
 
             if endog.squeeze().ndim == 1 and np.allclose(mu - endog, 0):

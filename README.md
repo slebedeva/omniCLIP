@@ -1,6 +1,30 @@
 # omniCLIP
 omniCLIP is a Bayesian peak caller that can be applied to data from CLIP-Seq experiments to detect regulatory elements in RNAs. 
 
+## How to run:
+
+!!! careful: there is a bug which causes omniCLIP to use all available CPUs independent of how many cores for it you specified. Be wary of this misbehavior when running on HPC (uses 3200% CPU!). I run it on my local machine which has 30G RAM.
+
+0. Create environment. I added my conda environment but it is possible that .yml file won´t work out of the box. Use it as guide to see which packages to install. Also you need to compile viterbi algorithm (see below on how to do it, you need to modify CompileCython.sh)
+
+1. Make database. My scripts are optimized to run with Gencode genome and annotation. 
+
+```
+## get gff 3 and genome sequence from gencode and unzip
+wget ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_19/gencode.v19.annotation.gff3.gz
+wget ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_19/GRCh37.p13.genome.fa.gz
+gunzip *.gz
+```
+You need to run split_fasta.sh and fix_chr_names.sh if working with gencode derived genome.
+Also separate chromosome fasta files should be gzipped again.
+
+Then run make_omniCLIP3_database.sh.
+
+2. Modify and run run_omniCLIP3.sh. I specify all paths inside this script. 
+
+Note: Your CLIP and background libraries have to match strands. If your CLIP is sequenced with standard Illumina small RNA kit and RNA-seq with stranded TrueSeq kit, they will be on opposite strand and you will need to reverse the strand of one of them to match. Use switch_strand.sh and switch_strand.awk for this.
+
+
 ## Overview
 
 [Introduction](#introduction)
@@ -22,22 +46,20 @@ omniCLIP is a Bayesian peak caller that can be applied to data from CLIP-Seq exp
 omniCLIP can call peaks for CLIP-Seq data data while accounting for confounding factors such as the gene expression and it automatically learns relevant diagnostic events from the data. Furtermore, it can leverage replicate information and model technical and biological variance.
 
 ## Dependencies and Requirements
-omniCLIP requires Python (v.2.7) and the following python libraries:
+omniCLIP requires Python (v.3.7) and the following python libraries:
 
-* biopython (> v.1.68)
-* brewer2mpl (> v.1.4)
-* cython (> v.0.24.1)
-* gffutils (> v.0.8.7.1)
-* h5py (> v.2.6.0)
-* intervaltree (> v.2.1.0)
-* matplotlib (> v.1.5.3)
-* numpy (> v.1.11.3)
-* pandas (> v0.19.0)
-* prettyplotlib (> v.0.1.7)
-* pysam (> v.0.9.1.4)
-* scikit-learn (> v.0.18.1)
-* scipy (> v.0.19.0)
-* statsmodels (> v.0.6.1)
+* biopython (> v.1.76)
+* cython (> v.0.29.15)
+* gffutils (> v.0.10.1)
+* h5py (> v.2.10.0)
+* intervaltree (> v.3.0.2)
+* matplotlib (> v.3.1.3)
+* numpy (> v.1.18.1)
+* pandas (> v.1.0.2)
+* pysam (> v.0.15.3)
+* scikit-learn (> v.0.22.1)
+* scipy (> v.1.4.1)
+* statsmodels (> v.0.11.0)
 
 Currently, omniCLIP requires a standard workstation with 32 Gb of RAM.
 
@@ -62,7 +84,12 @@ gcc -shared -pthread -fPIC -fwrapv -O2 -Wall -fno-strict-aliasing -I/usr/include
 
 ### Conda
 
-in progress...
+You can use omniCLIP3.yml definition file but often it will fail to create environment cross-system and cross-platform.
+
+Example command to create conda environment:
+```
+conda create --name omniCLIP3 python=3.7 biopython cython gffutils h5py intervaltree matplotlib numpy pandas pysam scikit-learn scipy statsmodels seqkit samtools
+```
 
 ### Galaxy
 
@@ -78,14 +105,14 @@ omniCLIP can be run as follows:
 ```
 $ python omniCLIP.py [Commands]
 ```
-omniCLIP has the following ***required*** commanline arguments
+omniCLIP has the following ***required*** commandline arguments
 
 Argument  | Description
 ------------- | -------------
 --annot | File where gene annotation is stored
 --genome-dir | Directory where fasta files are stored
---clip-files | Bam-file for CLIP-library. The alignments need to have the NM and MD tag. 
---bg-files | Bam-file for bg-library. The alignments need to have the NM and MD tag.
+--clip-files | Bam-file for CLIP-library. The alignments need to have the MD and NM tags. 
+--bg-files | Bam-file for bg-library. The alignments need to have the MD and NM tags.
 --out-dir | Output directory for results
 
 
@@ -96,7 +123,7 @@ Argument  | Description
 --restart-from-iter | restart from existing run
 --use-precomp-CLIP-data | Use existing fg_reads.dat file. This skips parsing the CLIP reads.
 --collapsed-CLIP | CLIP-reads are collapsed
---overwrite-bg-data | Use existing bg_reads.dat data. This skips parsing the CLIP reads.
+--use-precomp-bg-data | Use existing bg_reads.dat data. This skips parsing the CLIP reads.
 --collapsed-bg | bg-reads are collapsed
 --bck-var | Parse variants for background reads
 --verbosity | Verbosity
@@ -104,12 +131,12 @@ Argument  | Description
 --max-it-glm | Maximal number of iterations in GLM
 --tmp-dir | Output directory for temporary results
 --gene-sample | Nr of genes to sample
---no-subsample | Disabaple subsampling for parameter estimations (Warning: Leads to slow estimation)
+--no-subsample | Disable subsampling for parameter estimations (Warning: Leads to slow estimation)
 --filter-snps | Do not fit diagnostic events at SNP-positions
 --snp-ratio | Ratio of reads showing the SNP
 --snp-abs-cov | Absolute number of reads covering the SNP position (default = 10)
 --nr_mix_comp | Number of diagnostic events mixture components (default = 1)
---nb-cores | Number of cores o use'
+--nb-cores | Number of cores to use
 --mask-miRNA | Mask miRNA positions
 --mask-ovrlp | Ignore overlping gene regions for diagnostic event model fitting
 --norm_class | Normalize class weights during glm fit
@@ -122,17 +149,17 @@ Argument  | Description
 
 
 ## Examples
-An example dataset can be  downloaded [here](https://ohlerlab.mdc-berlin.de/files/omniCLIP/example_data.tar.gz). Extract it into the omniCLIP folder for the example below.
+An example dataset can be downloaded [here](https://ohlerlab.mdc-berlin.de/files/omniCLIP/example_data.tar.gz). Extract it into the omniCLIP folder for the example below.
 
 Then you can run omniCLIP on the example data by:
 ```
 $ python omniCLIP.py --annot example_data/gencode.v19.annotation.chr1.gtf.db --genome-dir example_data/hg37/ --clip-files example_data/PUM2_rep1_chr1.bam --clip-files example_data/PUM2_rep2_chr1.bam --bg-files example_data/RZ_rep1_chr1.bam --bg-files example_data/RZ_rep2_chr1.bam --out-dir example_data --collapsed-CLIP --bck-var
 ```
-This command creats the files below:
+which creates the files below:
 
 File Name | Description
 ------------- | -------------
-pred.bed | This file contains the peaks that are signifikant after Bonferroni correction
+pred.bed | This file contains the peaks that are significant after Bonferroni correction
 pred.txt | This file contains all peaks 
 fg_reads.dat | This file contains the parsed reads from the CLIP libraries
 bg_reads.dat | This file contains the parsed reads from the background libraries

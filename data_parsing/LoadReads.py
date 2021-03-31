@@ -34,7 +34,8 @@ import os
 import pysam
 
 
-#@profile
+##@profile
+#@profile 
 def load_data(bam_files, genome_dir, gene_annotation, out_file, load_from_file = False, save_results = True, Collapse = False, OnlyCoverage = False, select_chrom = None, store_gene_seq=False, mask_flank_variants=3, max_mm=2, ign_out_rds=False, rev_strand=None):
 	'''
 	This function reads the data from the bam-files
@@ -48,9 +49,9 @@ def load_data(bam_files, genome_dir, gene_annotation, out_file, load_from_file =
 			GeneConversionEvents = h5py.File(out_file, 'w')
 
 		if OnlyCoverage:
-			print('Loading coverage only')
+			print ('Loading coverage only')
 
-		print "Parsing the gene annotation"
+		print("Parsing the gene annotation")
 		Iter = gene_annotation.features_of_type('gene')
 		Genes = []
 		for gene in Iter:
@@ -62,7 +63,7 @@ def load_data(bam_files, genome_dir, gene_annotation, out_file, load_from_file =
 			genes_chr_dict[gene.chrom].append(gene)
 
 		#Create a list of cromosomes
-		Chrs = genes_chr_dict.keys()
+		Chrs = list(genes_chr_dict.keys())
 
 		Chrs = [chrom for chrom in Chrs if chrom.lower() != 'chrm']
 
@@ -75,13 +76,13 @@ def load_data(bam_files, genome_dir, gene_annotation, out_file, load_from_file =
 				if select_chrom != CurrChr:
 					continue
 			#Make sure that the CurrChr is indeed a CurrChromosome and not header information
-			print 'Processing ' + CurrChr
+			print('Processing ' + CurrChr)
 			#Get the genome
 			CurrChrFile  = os.path.join(genome_dir, CurrChr + '.fa.gz')
 			if not os.path.isfile(CurrChrFile):
-				print 'Warning, chromosome not found: ' + CurrChrFile
+				print('Warning, chromosome not found: ' + CurrChrFile)
 				continue
-			handle = gzip.open(CurrChrFile, "rU")
+			handle = gzip.open(CurrChrFile, "rt" )
 			record_dict = SeqIO.to_dict(SeqIO.parse(handle, "fasta"))
 			CurrChrSeq = record_dict[CurrChr]
 			handle.close()
@@ -90,6 +91,8 @@ def load_data(bam_files, genome_dir, gene_annotation, out_file, load_from_file =
 				#Iterate over the Genes
 				SamReader = pysam.Samfile(bam_file,'rb')
 				for gene in Genes:
+					if gene.id.count('_PAR_Y') > 0:
+						continue
 					Variants = {}
 					ReadEnds = {}
 					Coverage = {}
@@ -99,15 +102,26 @@ def load_data(bam_files, genome_dir, gene_annotation, out_file, load_from_file =
 						new_gene_name = gene.id.split('.')[0]
 						Strand =  1 if gene.strand == '+' else -1
 						#get the data
-						Coverage = GetCoverageFromBam.GetRawCoverageFromRegion(SamReader, CurrChr, Start, Stop, Collapse = Collapse, CovType = 'coverage', Genome = '', legacy = False, mask_flank_variants=mask_flank_variants, max_mm=max_mm, ign_out_rds=ign_out_rds, gene_strand=Strand, rev_strand=rev_strand)
-						#Check that group already exists, otherwise create it
+						CovType = ['coverage']
+						if not OnlyCoverage:
+							CovType += ['variants', 'read-ends']
+
+						ret_arrays = GetCoverageFromBam.GetRawCoverageFromRegion(SamReader, CurrChr, Start, Stop, Collapse = Collapse, CovType = CovType, Genome = '', legacy = False, mask_flank_variants=mask_flank_variants, max_mm=max_mm, ign_out_rds=ign_out_rds, gene_strand=Strand, rev_strand=rev_strand)
+						Coverage = ret_arrays['coverage']
+						#Coverage = GetCoverageFromBam.GetRawCoverageFromRegion(SamReader, CurrChr, Start, Stop, Collapse = Collapse, CovType = 'coverage', Genome = '', legacy = False, mask_flank_variants=mask_flank_variants, max_mm=max_mm, ign_out_rds=ign_out_rds, gene_strand=Strand, rev_strand=rev_strand)
 						if not new_gene_name in GeneConversionEvents:
 							GeneConversionEvents.create_group(new_gene_name)
+						if not 'SummedCoverage' in GeneConversionEvents[new_gene_name]:
+							GeneConversionEvents[new_gene_name].create_group('SummedCoverage')
+
+						#Save the total coverage
+						GeneConversionEvents[new_gene_name]['SummedCoverage'].create_dataset(str(i), data=Coverage, compression="gzip", compression_opts=9, chunks=Coverage.shape)
+						
 						if not OnlyCoverage:
-							Variants = GetCoverageFromBam.GetRawCoverageFromRegion(SamReader, CurrChr, Start, Stop, Collapse = Collapse, CovType = 'variants', Genome = '', legacy = False, mask_flank_variants=mask_flank_variants, max_mm=max_mm, ign_out_rds=ign_out_rds, gene_strand=Strand, rev_strand=rev_strand)
-							ReadEnds = GetCoverageFromBam.GetRawCoverageFromRegion(SamReader, CurrChr, Start, Stop, Collapse = Collapse, CovType = 'read-ends', Genome = '', legacy = False, mask_flank_variants=mask_flank_variants, max_mm=max_mm, ign_out_rds=ign_out_rds, gene_strand=Strand, rev_strand=rev_strand)
-							
-							Coverage = Coverage - np.sum(Variants, axis = 0) - ReadEnds
+							Variants = ret_arrays['variants']
+							ReadEnds = ret_arrays['read-ends']
+
+							Coverage = Coverage - np.sum(Variants, axis=0) - np.sum(ReadEnds, axis=0)
 
 							#Get the TC conversions
 							CurrSeq = str(CurrChrSeq.seq[Start : Stop]).upper()
@@ -121,28 +135,43 @@ def load_data(bam_files, genome_dir, gene_annotation, out_file, load_from_file =
 								GeneConversionEvents.create_group(new_gene_name)
 
 							if not 'Coverage' in GeneConversionEvents[new_gene_name]:
-								if store_gene_seq and str(i)=='0':
+								if store_gene_seq and (str(i) == '0'):
 									GeneConversionEvents[new_gene_name].create_group('GeneSeq')
 								GeneConversionEvents[new_gene_name].create_group('Variants')
 								GeneConversionEvents[new_gene_name].create_group('Coverage')
 								GeneConversionEvents[new_gene_name].create_group('Read-ends')
 							
+							#Ignore Variants at N positions
+							Variants[:, GeneSeq[0, :] == 4] = 0 
+							Variants[Variants < 0] = 0
+
 							non_zer_var = np.where(Variants)
 							ij = np.vstack((GeneSeq[0, non_zer_var[1]] * 5 + non_zer_var[0], non_zer_var[1]))
-							Variants = csr_matrix((Variants[np.where(Variants)], ij), shape=(20,len(CurrSeq))).toarray()
+							Variants_sparse = csr_matrix((Variants[np.where(Variants)], ij), shape=(20,len(CurrSeq)))
+							Variants = Variants_sparse.toarray()
+							#pdb.set_trace()
 							del non_zer_var, ij
 
 							if store_gene_seq:
-								GeneConversionEvents[new_gene_name]['GeneSeq'].create_dataset(str(i), data=GeneSeq, compression="gzip", compression_opts=9, chunks=GeneSeq.shape)
-							GeneConversionEvents[new_gene_name]['Variants'].create_dataset(str(i), data=Variants, compression="gzip", compression_opts=9, chunks=Variants.shape)
+								GeneConversionEvents[new_gene_name]['GeneSeq'].create_dataset(str(i), data=GeneSeq, compression="gzip", compression_opts=9, )#, chunks=GeneSeq.shape)
+							#GeneConversionEvents[new_gene_name]['Variants'].create_dataset(str(i), data=Variants, compression="gzip", compression_opts=9)#, chunks=Variants.shape)
+							GeneConversionEvents[new_gene_name]['Variants'].create_group(str(i))
+							GeneConversionEvents[new_gene_name]['Variants'][str(i)].create_dataset('data', data=Variants_sparse.data)
+							GeneConversionEvents[new_gene_name]['Variants'][str(i)].create_dataset('indptr', data=Variants_sparse.indptr)
+							GeneConversionEvents[new_gene_name]['Variants'][str(i)].create_dataset('indices', data=Variants_sparse.indices)
+							GeneConversionEvents[new_gene_name]['Variants'][str(i)].create_dataset('shape', data=Variants.shape)
 
 							#Only save the positions where a read in one of the replicates occured
-							GeneConversionEvents[new_gene_name]['Read-ends'].create_dataset(str(i), data=ReadEnds, compression="gzip", compression_opts=9, chunks=ReadEnds.shape)
-							del Variants, ReadEnds, CurrSeq, GeneSeq
+							GeneConversionEvents[new_gene_name]['Read-ends'].create_dataset(str(i), data=ReadEnds, compression="gzip", compression_opts=9)#, chunks=ReadEnds.shape)
+
+
+							del Variants, ReadEnds, CurrSeq, GeneSeq, Variants_sparse
+
 						else:
 							if not 'Coverage' in GeneConversionEvents[new_gene_name]:								
 								GeneConversionEvents[new_gene_name].create_group('Coverage')
-						GeneConversionEvents[new_gene_name]['Coverage'].create_dataset(str(i), data=Coverage, compression="gzip", compression_opts=9, chunks=Coverage.shape)
+						GeneConversionEvents[new_gene_name]['Coverage'].create_dataset(str(i), data=Coverage, compression="gzip", compression_opts=9)#, chunks=Coverage.shape)
+						
 						if str(i)=='0':
 							GeneConversionEvents[new_gene_name].create_dataset('strand', data=Strand)
 						del Coverage
@@ -150,7 +179,7 @@ def load_data(bam_files, genome_dir, gene_annotation, out_file, load_from_file =
 			del CurrChrSeq
 			del record_dict
 			
-		print 'Saving results'
+		print('Saving results')
 		GeneConversionEvents.close()
 		GeneConversionEvents = h5py.File(out_file, 'r+')
 	return GeneConversionEvents

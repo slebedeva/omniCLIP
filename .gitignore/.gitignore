@@ -1,4 +1,12 @@
+# from compiler
+data_parsing/__pycache__/
+stat/__pycache__/
+stat/compile.warning
+stat/viterbi.c
+stat/viterbi.so
+
 # Byte-compiled / optimized / DLL files
+*/__pycache__/
 __pycache__/
 *.py[cod]
 *$py.class
