@@ -5,9 +5,11 @@ omniCLIP is a Bayesian peak caller that can be applied to data from CLIP-Seq exp
 
 !!! careful: there is a bug which causes omniCLIP to use all available CPUs independent of how many cores for it you specified. Be wary of this misbehavior when running on HPC (uses 3200% CPU!). I run it on my local machine which has 30G RAM.
 
-0. Create environment. I added my conda environment but it is possible that .yml file won´t work out of the box. Use it as guide to see which packages to install. Also you need to compile viterbi algorithm (see below on how to do it, you need to modify CompileCython.sh)
+0. Create environment. I added my conda environment but it is possible that .yml file won´t work out of the box. Use it as guide to see which packages to install. 
 
-1. Make database. My scripts are optimized to run with Gencode genome and annotation. 
+1. Compile viterbi algorithm. Modify CompileCython.sh to include path to your python (for example, for conda environment, something like `-I/home/lebedeva/miniconda3/envs/omniCLIP3/include/python3.7m`) and run it.
+
+2. Make database. My scripts are optimized to run with Gencode genome and annotation. 
 
 ```
 ## get gff 3 and genome sequence from gencode and unzip
@@ -20,7 +22,7 @@ Also separate chromosome fasta files should be gzipped again.
 
 Then run make_omniCLIP3_database.sh.
 
-2. Modify and run run_omniCLIP3.sh. I specify all paths inside this script. 
+3. Modify and run run_omniCLIP3.sh. I specify all paths inside this script. 
 
 Note: Your CLIP and background libraries have to match strands. If your CLIP is sequenced with standard Illumina small RNA kit and RNA-seq with stranded TrueSeq kit, they will be on opposite strand and you will need to reverse the strand of one of them to match. Use switch_strand.sh and switch_strand.awk for this.
 
